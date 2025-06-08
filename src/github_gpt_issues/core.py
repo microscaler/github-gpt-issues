@@ -154,10 +154,10 @@ def expand_stories_batch(
     detail_level="medium",
     prompt_template_path=None
 ):
-    """
-    Batch expand multiple actor_lines in one API call.
-    Returns a dict actor_line -> story_body.
-    """
+    # Early return for empty input
+    if not actor_lines:
+        return {}
+
     # build prompt
     batch_text = "Generate complete user stories for:\n" + "\n".join(f"- {a}" for a in actor_lines)
     user_content = batch_text
