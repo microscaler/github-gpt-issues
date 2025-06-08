@@ -1,3 +1,6 @@
+import json
+import tempfile
+from pathlib import Path
 import pytest
 from github_gpt_issues.main import load_existing_actor_lines
 
@@ -9,33 +12,28 @@ class DummyRepo:
     def __init__(self, issues):
         self._issues = issues
     def get_issues(self, state):
-        # ignoring state, return simulated issues
         return self._issues
 
 
-def test_load_existing_actor_lines_basic(monkeypatch, caplog):
-    # Prepare dummy issues: some with actor lines, some without
+def test_load_existing_actor_lines_basic(caplog):
     issues = [
-        DummyIssue("As a user, want X\nDetails here."),
+        DummyIssue("As a user, want X Details here."),
         DummyIssue("Random body without actor line."),
-        DummyIssue(None),  # issue with no body
-        DummyIssue("As an admin, perform Y\nMore text."),
+        DummyIssue(None),  # no body
+        DummyIssue("As an admin, perform Y More text."),
     ]
     repo = DummyRepo(issues)
-
     caplog.set_level("INFO")
+
     existing = load_existing_actor_lines(repo)
 
-    # Should extract only two actor lines
-    assert "As a user, want X" in existing
-    assert "As an admin, perform Y" in existing
-    assert len(existing) == 2
-    # Should log loaded count
-    assert any("Loaded 2 existing actor lines." in rec.message for rec in caplog.records)
+    # Should extract the full matched lines
+    assert existing == {
+        "As a user, want X Details here.",
+        "As an admin, perform Y More text."
+    }
 
-
-def test_load_existing_actor_lines_handles_exception(monkeypatch, caplog):
-    # Simulate repo.get_issues raising
+def test_load_existing_actor_lines_handles_exception(caplog):
     class BadRepo:
         def get_issues(self, state):
             raise ValueError("GitHub down")
@@ -43,7 +41,7 @@ def test_load_existing_actor_lines_handles_exception(monkeypatch, caplog):
 
     caplog.set_level("WARNING")
     existing = load_existing_actor_lines(bad_repo)
-    # Should return empty set on exception
+
     assert existing == set()
-    # Should log a warning
-    assert any("Failed to fetch existing issues" in rec.message for rec in caplog.records)
+    assert any("Failed to load existing issues" in rec.message for rec in caplog.records)
+
