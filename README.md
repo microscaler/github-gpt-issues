@@ -11,7 +11,7 @@
 [![Last Commit](https://img.shields.io/github/last-commit/microscaler/github-gpt-issues.svg)](https://github.com/microscaler/github-gpt-issues/commits/main)
 [![Open Issues](https://img.shields.io/github/issues/microscaler/github-gpt-issues.svg)](https://github.com/microscaler/github-gpt-issues/issues)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/microscaler)](https://github.com/sponsors/microscaler)
-// 
+
 
 # github-gpt-issues
 
