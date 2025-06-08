@@ -25,10 +25,12 @@ def load_existing_actor_lines(repo):
     existing = set()
     try:
         for issue in repo.get_issues(state="all"):
-            body = issue.body or ""
+            raw_body = getattr(issue, "body", "") or ""
+            # Remove leading/trailing whitespace so our regex can match cleanly
+            body = raw_body.strip()
             m = pattern.search(body)
             if m:
-                existing.add(m.group(1))
+                existing.add(m.group(1).strip())
     except Exception as e:
         logger.warning(f"Failed to load existing issues: {e}")
     return existing
