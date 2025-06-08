@@ -1,7 +1,7 @@
 import pytest
 import json
 import openai
-from github_gpt_issues.core import expand_stories_batch, _retry, expand_story
+from github_gpt_issues.core import expand_stories_batch, _retry
 
 # Dummy function to simulate API errors and successes
 def flaky_func_factory(failures, exception_type):
@@ -110,4 +110,3 @@ def test_retry_raises_after_max(monkeypatch):
     with pytest.raises(openai.error.APIError):
         _retry(func, max_retries=3, initial_delay=0, backoff=1)
     assert func.state['calls'] == 3
-

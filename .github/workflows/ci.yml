@@ -33,7 +33,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Lint
-        run: flake8 src/
+        run: flake8 src/ --max-line-length=120 --ignore=E265,E501,E702,F401
 
       - name: Format check
         run: black --check src/
@@ -42,12 +42,17 @@ jobs:
         run: pytest
 
       - name: Run main script tests
-        run: python src/github_gpt_issues/main.py --run-tests
+        run: pytest --maxfail=1 --cov=src --cov-report=term-missing
 
       - name: Run tests with coverage
         run: |
           coverage run -m pytest
-          coverage report --skip-covered
+          coverage report --skip-covered --format=markdown | tee coverage.md
           coverage html
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+      - name: Upload coverage report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          path: coverage.md
+
+      - name: Display coverage in GitHub summary
+        run: cat coverage.md >> $GITHUB_STEP_SUMMARY
