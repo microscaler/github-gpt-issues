@@ -55,3 +55,33 @@ def patch_openai(monkeypatch):
 
     # Patch the ChatCompletion.create method
     monkeypatch.setattr(core_module.openai.ChatCompletion, 'create', fake_create)
+
+
+def test_expand_story_raw_fallback(monkeypatch):
+    import github_gpt_issues.core as core
+    from tests.conftest import DummyResponse, DummyChoice, DummyMessage
+    # Simulate raw content response without function_call
+    def fake_raw(*args, **kwargs):
+        return DummyResponse(DummyChoice(DummyMessage(content="Extra details here")))
+    monkeypatch.setattr(core.openai.ChatCompletion, 'create', fake_raw)
+
+    actor = "As a user, want raw"
+    result = core.expand_story(actor)
+    assert actor in result
+    assert "Extra details here" in result
+
+
+def test_expand_story_prefixed(monkeypatch):
+    import github_gpt_issues.core as core
+    from tests.conftest import DummyResponse, DummyChoice, DummyMessage
+    # Simulate response starting with actor_line
+    actor = "As a user, already"
+    def fake_prefixed(*args, **kwargs):
+        # Properly escape newline in content string
+        return DummyResponse(DummyChoice(DummyMessage(content=actor + "More info")))
+    monkeypatch.setattr(core.openai.ChatCompletion, 'create', fake_prefixed)
+
+    result = core.expand_story(actor)
+    # Actor line appears only once and body includes extra text
+    assert result.count(actor) == 1
+    assert "More info" in result

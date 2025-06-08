@@ -43,3 +43,11 @@ jobs:
 
       - name: Run main script tests
         run: python src/github_gpt_issues/main.py --run-tests
+
+      - name: Run tests with coverage
+        run: |
+          coverage run -m pytest
+          coverage report --skip-covered
+          coverage html
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3

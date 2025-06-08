@@ -1,10 +1,12 @@
+# src/github_gpt_issues/core.py
 #!/usr/bin/env python3
 """
 Core functionality for github-gpt-issues:
 - parse_markdown
-- expand_story with optional Jinja2 prompt template
+- expand_story with optional Jinja2 prompt template and response caching
 - create_milestone_and_issues
 """
+import os
 import json
 import re
 import logging
@@ -37,21 +39,41 @@ def parse_markdown(markdown_text):
     return sections
 
 
-def expand_story(actor_line, model="gpt-4", tone="neutral", detail_level="medium", prompt_template_path=None):
+def expand_story(
+    actor_line,
+    model="gpt-4",
+    tone="neutral",
+    detail_level="medium",
+    prompt_template_path=None,
+    cache_file=None
+):
     """
     Expand an actor_line into a full user story using OpenAI function-calling.
 
-    Supports optional prompt template via Jinja2, customizing tone and detail level.
-    Returns a markdown body starting with the actor_line, a description, and acceptance criteria.
+    Supports optional Jinja2 prompt template and response caching.
+    - cache_file: path to JSON file for caching actor_line -> story_body
+    Returns a markdown body starting with the actor_line, a description,
+    and an Acceptance Criteria section.
     """
-    # Prepare the user prompt
+    # Load cache
+    cache = {}
+    if cache_file:
+        try:
+            if os.path.exists(cache_file):
+                with open(cache_file, 'r', encoding='utf-8') as cf:
+                    cache = json.load(cf)
+        except Exception as e:
+            logger.warning(f"Failed to read cache file '{cache_file}': {e}")
+        if actor_line in cache:
+            return cache[actor_line]
+
+    # Prepare user prompt
     user_content = actor_line
     if prompt_template_path:
         try:
             from jinja2 import Template
-            with open(prompt_template_path, 'r', encoding='utf-8') as f:
-                tpl_content = f.read()
-            tpl = Template(tpl_content)
+            tpl_text = open(prompt_template_path, 'r', encoding='utf-8').read()
+            tpl = Template(tpl_text)
             user_content = tpl.render(
                 actor_line=actor_line,
                 tone=tone,
@@ -60,15 +82,15 @@ def expand_story(actor_line, model="gpt-4", tone="neutral", detail_level="medium
         except ImportError:
             logger.warning("jinja2 not installed; falling back to actor_line only.")
         except Exception as e:
-            logger.warning(f"Error with prompt template ({e}); falling back to actor_line only.")
+            logger.warning(f"Error reading template ({e}); falling back to actor_line only.")
 
-    # Call the API
+    # Call OpenAI
     try:
-        response = openai.ChatCompletion.create(
+        resp = openai.ChatCompletion.create(
             model=model,
             messages=[
                 {"role": "system", "content": "You are an expert product manager writing clear user stories."},
-                {"role": "user", "content": user_content}
+                {"role": "user",   "content": user_content}
             ],
             functions=[{
                 "name": "create_user_story",
@@ -85,8 +107,9 @@ def expand_story(actor_line, model="gpt-4", tone="neutral", detail_level="medium
             }],
             function_call="auto"
         )
-        msg = response.choices[0].message
-        # Structured path
+        msg = resp.choices[0].message
+
+        # Structured output
         if msg.get("function_call"):
             payload = json.loads(msg.function_call.arguments)
             body = (
@@ -95,20 +118,36 @@ def expand_story(actor_line, model="gpt-4", tone="neutral", detail_level="medium
             )
             for crit in payload['acceptance_criteria']:
                 body += f"- {crit}\n"
-            return body
-
-        # Fallback to raw content
-        text = msg.content.strip() if msg.content else ""
-        if not text.startswith(actor_line):
-            text = f"{actor_line}\n\n{text}"
-        return text
+        else:
+            text = (msg.content or "").strip()
+            body = text if text.startswith(actor_line) else f"{actor_line}\n\n{text}"
 
     except Exception as e:
         logger.error(f"OpenAI request failed for '{actor_line}': {e}")
-        return f"{actor_line}\n\n**Failed to expand story**"
+        body = f"{actor_line}\n\n**Failed to expand story**"
+
+    # Save to cache
+    if cache_file:
+        try:
+            cache[actor_line] = body
+            with open(cache_file, 'w', encoding='utf-8') as cf:
+                json.dump(cache, cf, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to write cache file '{cache_file}': {e}")
+
+    return body
 
 
-def create_milestone_and_issues(repo, section, model, existing_actor_lines):
+def create_milestone_and_issues(
+    repo,
+    section,
+    model,
+    existing_actor_lines,
+    tone="neutral",
+    detail_level="medium",
+    prompt_template_path=None,
+    cache_file=None
+):
     """
     Create a milestone for the given section and issues for each new actor_line in that section.
 
@@ -119,7 +158,6 @@ def create_milestone_and_issues(repo, section, model, existing_actor_lines):
         milestone = repo.create_milestone(title=epic)
         logger.info(f"Created milestone: {epic}")
     except GithubException:
-        # Try to fetch it if it already exists
         milestone = next((m for m in repo.get_milestones() if m.title == epic), None)
         if not milestone:
             logger.error(f"Could not create or find milestone '{epic}'. Skipping.")
@@ -129,8 +167,16 @@ def create_milestone_and_issues(repo, section, model, existing_actor_lines):
         if actor_line in existing_actor_lines:
             logger.info(f"Skipping duplicate actor_line: {actor_line}")
             continue
+
         logger.info(f"Expanding & creating issue for: {actor_line}")
-        body = expand_story(actor_line, model=model)
+        body = expand_story(
+            actor_line,
+            model=model,
+            tone=tone,
+            detail_level=detail_level,
+            prompt_template_path=prompt_template_path,
+            cache_file=cache_file
+        )
         title = actor_line if len(actor_line) <= 50 else actor_line[:47] + "..."
         try:
             issue = repo.create_issue(title=title, body=body, milestone=milestone)
