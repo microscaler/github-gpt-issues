@@ -1,3 +1,18 @@
+[![PyPI](https://img.shields.io/pypi/v/github-gpt-issues.svg)](https://pypi.org/project/github-gpt-issues/)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/microscaler/github-gpt-issues/ci.yml?branch=main)](https://github.com/microscaler/github-gpt-issues/actions)
+[![Coverage Status](https://img.shields.io/codecov/c/github/microscaler/github-gpt-issues/main.svg)](https://codecov.io/gh/microscaler/github-gpt-issues)
+[![License](https://img.shields.io/github/license/microscaler/github-gpt-issues.svg)](./LICENSE)
+[![Python Versions](https://img.shields.io/pypi/pyversions/github-gpt-issues.svg)](https://pypi.org/project/github-gpt-issues/)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/github-gpt-issues.svg)](https://pypi.org/project/github-gpt-issues/)
+[![Code Style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Linting: flake8](https://img.shields.io/badge/lint-flake8-blueviolet.svg)](https://flake8.pycqa.org/)
+[![Docs](https://img.shields.io/readthedocs/github-gpt-issues.svg)](https://readthedocs.org/projects/github-gpt-issues/)
+[![Contributors](https://img.shields.io/github/contributors/microscaler/github-gpt-issues.svg)](https://github.com/microscaler/github-gpt-issues/graphs/contributors)
+[![Last Commit](https://img.shields.io/github/last-commit/microscaler/github-gpt-issues.svg)](https://github.com/microscaler/github-gpt-issues/commits/main)
+[![Open Issues](https://img.shields.io/github/issues/microscaler/github-gpt-issues.svg)](https://github.com/microscaler/github-gpt-issues/issues)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/microscaler)](https://github.com/sponsors/microscaler)
+// 
+
 # github-gpt-issues
 
 A CLI tool that turns a simple markdown file of user-story lines into fully-formed GitHub issues, powered by the OpenAI API.
