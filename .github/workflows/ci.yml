@@ -46,7 +46,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          coverage run -m pytest
+          pytest --cov
           coverage report --skip-covered --format=markdown | tee coverage.md
           coverage html
       - name: Upload coverage report as artifact

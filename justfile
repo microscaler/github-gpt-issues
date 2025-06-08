@@ -9,6 +9,11 @@ install:
 test:
     pytest
 
+cov:
+    pytest --cov
+    coverage report --skip-covered --format=markdown | tee coverage.md
+    coverage html
+
 lint:
     flake8 src/
 
