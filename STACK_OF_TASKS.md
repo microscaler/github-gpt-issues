@@ -32,11 +32,11 @@ Before tackling the tasks below, the ChatGPT code-generation agent should adhere
 ## 3. Batch API Calls & Rate-Limit Handling
 - [x] Group multiple `actor_line`s into a single ChatCompletion batch request.
 - [x] Split the combined response back into individual story bodies.
-- [ ] Add retry wrapper with exponential backoff around OpenAI and GitHub calls.
+- [x] Add retry wrapper with exponential backoff around OpenAI and GitHub calls.
 
 ### 3.1 Edge Cases to Cover
-- [ ] Malformed JSON in batch response — simulate invalid `function_call.arguments` and fallback gracefully.
-- [ ] Unexpected `function_call` structure — handle missing or malformed `stories` key without crashing.
+- [x] Malformed JSON in batch response — simulate invalid `function_call.arguments` and fallback gracefully.
+- [x] Unexpected `function_call` structure — handle missing or malformed `stories` key without crashing.
 - [ ] Batch raw-content fallback — simulate responses using `msg.content` and ensure delegation to `expand_story`.
 - [ ] Non-retryable errors in `_retry` (e.g., generic `ValueError`) should not be retried.
 - [ ] Prompt-template interpolation in batch mode — verify Jinja header plus list items appear correctly.

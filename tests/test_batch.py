@@ -110,3 +110,52 @@ def test_retry_raises_after_max(monkeypatch):
     with pytest.raises(openai.error.APIError):
         _retry(func, max_retries=3, initial_delay=0, backoff=1)
     assert func.state['calls'] == 3
+
+def test_expand_stories_batch_malformed_json(monkeypatch, caplog):
+    """
+    If the batch function_call.arguments is invalid JSON,
+    expand_stories_batch should catch it, warn, and fall back
+    to individual expand_story calls.
+    """
+    import github_gpt_issues.core as core_module
+    from types import SimpleNamespace
+
+    # 1) Fake a ChatCompletion response with a bad JSON payload
+    class BadMsg:
+        def __init__(self):
+            self.function_call = SimpleNamespace(
+                name="create_user_stories_batch",
+                arguments='{"stories": [INVALID JSON]}'
+            )
+            self.content = None
+
+    class BadChoice:
+        def __init__(self):
+            self.message = BadMsg()
+
+    class BadResp:
+        def __init__(self):
+            self.choices = [BadChoice()]
+
+    # 2) Patch openai to return that response
+    monkeypatch.setattr(openai.ChatCompletion, "create", lambda *a, **k: BadResp())
+
+    # 3) Patch expand_story so we can detect fallback calls
+    monkeypatch.setattr(
+        core_module, "expand_story",
+        lambda actor_line, **kwargs: f"story_for_{actor_line}"
+    )
+
+    caplog.set_level("WARNING")
+    result = core_module.expand_stories_batch(
+        ["X1", "X2"], model="gpt-test"
+    )
+
+    # We should have fallen back to expand_story for each actor_line
+    assert result == {
+        "X1": "story_for_X1",
+        "X2": "story_for_X2",
+    }
+
+    # And a warning was logged about the batch failure
+    assert any("Batch expand failed" in rec.message for rec in caplog.records)
