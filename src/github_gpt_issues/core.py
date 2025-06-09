@@ -260,7 +260,33 @@ def expand_stories_batch(
     except Exception as e:
         logger.warning(f"Batch expand failed ({e}); falling back to individual calls")
 
-    # 5) Fallback to single‐story expansion
+    # 5) Plain-text batch split if no function_call but content present
+    try:
+        text = msg.content or ""
+        if text:
+            out = {}
+            for idx, al in enumerate(actor_lines):
+                # Locate this actor_line in the raw text
+                pattern = re.escape(al)
+                matches = list(re.finditer(rf'^' + pattern + r'.*', text, re.MULTILINE))
+                if not matches:
+                    continue
+                start = matches[0].start()
+                # Determine end: start of next actor_line or end of text
+                if idx + 1 < len(actor_lines):
+                    next_pattern = re.escape(actor_lines[idx+1])
+                    next_match = re.search(rf'^' + next_pattern + r'.*', text[start:], re.MULTILINE)
+                    end = start + (next_match.start() if next_match else len(text))
+                else:
+                    end = len(text)
+                out[al] = text[start:end].strip()
+            if out:
+                return out
+    except Exception:
+        logger.warning("Failed to split plain-text batch response; falling back to individual calls")
+
+
+    # 6) Fallback to single‐story expansion
     from .core import expand_story  # avoid top-level circular import
 
     return {

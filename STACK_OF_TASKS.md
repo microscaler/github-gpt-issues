@@ -31,7 +31,7 @@ Before tackling the tasks below, the ChatGPT code-generation agent should adhere
 
 ## 3. Batch API Calls & Rate-Limit Handling
 - [x] Group multiple `actor_line`s into a single ChatCompletion batch request.
-- [ ] Split the combined response back into individual story bodies.
+- [x] Split the combined response back into individual story bodies.
 - [ ] Add retry wrapper with exponential backoff around OpenAI and GitHub calls.
 
 ### 3.1 Edge Cases to Cover
