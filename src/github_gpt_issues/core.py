@@ -280,14 +280,17 @@ def create_milestone_and_issues(
     prompt_template_path=None,
     cache_file=None
 ):
-    """
-    Create a milestone and batch‐expand & create issues for new actor_lines.
-    """
     epic = section["title"]
     try:
         milestone = _retry(repo.create_milestone, title=epic)
     except GithubException:
-        milestone = next((m for m in repo.get_milestones() if m.title == epic), None)
+        # retry fetching existing milestones if creation failed
+        try:
+            all_ms = _retry(repo.get_milestones)
+        except Exception as ge:
+            logger.error(f"Failed to fetch milestones: {ge}")
+            return
+        milestone = next((m for m in all_ms if m.title == epic), None)
         if not milestone:
             logger.error(f"Can't find or create milestone '{epic}'")
             return
@@ -296,7 +299,6 @@ def create_milestone_and_issues(
     if not new_lines:
         return
 
-    # Batch‐expand
     bodies = expand_stories_batch(
         new_lines,
         model=model,
@@ -305,7 +307,6 @@ def create_milestone_and_issues(
         prompt_template_path=prompt_template_path
     )
 
-    # Create issues
     for al in new_lines:
         body = bodies.get(al, f"{al}\n\n**Failed to expand story**")
         title = al if len(al) <= 50 else al[:47] + "..."
