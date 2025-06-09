@@ -110,6 +110,19 @@ We use `pytest` + `pytest-cov` to ensure >80% coverage:
 pytest --cov=src --cov-report=term-missing
 ```
 
+--- 
+
+## Coverage report:
+| Name                            |    Stmts |     Miss |   Cover |
+|-------------------------------- | -------: | -------: | ------: |
+| src/github\_gpt\_issues/core.py |      129 |       24 |     81% |
+| src/github\_gpt\_issues/main.py |       56 |       30 |     46% |
+| tests/test\_cache.py            |       35 |        1 |     97% |
+| tests/test\_core\_extended.py   |       47 |        1 |     98% |
+| tests/test\_github.py           |       51 |        1 |     98% |
+|                       **TOTAL** |  **540** |   **57** | **89%** |
+
+
 ---
 
 ## Contributing

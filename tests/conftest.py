@@ -19,31 +19,38 @@ SRC_PATH = os.path.abspath(os.path.join(os.getcwd(), "src"))
 if SRC_PATH not in sys.path:
     sys.path.insert(0, SRC_PATH)
 
-import pytest
-import json
-from types import SimpleNamespace
+import pytest  # noqa: E402
+import json  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Dummy classes to simulate OpenAI function responses
 # ──────────────────────────────────────────────────────────────────────────────
+
+
 class DummyFunctionCall:
     def __init__(self, arguments):
         self.arguments = arguments
+
 
 class DummyChoice:
     def __init__(self, message):
         self.message = message
 
+
 class DummyMessage:
     def __init__(self, content=None, function_call=None):
         self.content = content
         self.function_call = function_call
+
     def get(self, key, default=None):
         return getattr(self, key, default)
+
 
 class DummyResponse:
     def __init__(self, choice):
         self.choices = [choice]
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Global fixture to patch openai.ChatCompletion.create
