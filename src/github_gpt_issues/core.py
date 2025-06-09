@@ -33,19 +33,14 @@ def parse_markdown(markdown_text):
     Returns:
       List[Dict]: each dict has keys: 'number', 'title', 'stories'
     """
-    section_pattern = re.compile(r"^##\s+(\d+)\.\s+(.+)$", re.MULTILINE)
-    story_pattern = re.compile(r"^\s*\d+\.\d+\.\s*\*\*(.+?)\*\*", re.MULTILINE)
+    section_pattern = re.compile(r'^##\s+(\d+)\.\s+(.+)$', re.MULTILINE)
+    story_pattern = re.compile(r'^\s*\d+\.\d+\.\s*\*\*(.+?)\*\*', re.MULTILINE)
     sections = []
     current = None
-
     for line in markdown_text.splitlines():
         sec = section_pattern.match(line)
         if sec:
-            current = {
-                "number": sec.group(1),
-                "title": sec.group(2).strip(),
-                "stories": [],
-            }
+            current = {"number": sec.group(1), "title": sec.group(2).strip(), "stories": []}
             sections.append(current)
         elif current:
             st = story_pattern.match(line)
@@ -57,18 +52,16 @@ def parse_markdown(markdown_text):
 
 def _retry(func, *args, max_retries=3, initial_delay=1, backoff=2, **kwargs):
     """
-    Retry wrapper for API calls on RateLimitError and APIError.
+    Retry wrapper for API calls on RateLimitError, APIError, and GithubException.
     """
     delay = initial_delay
     for attempt in range(1, max_retries + 1):
         try:
             return func(*args, **kwargs)
-        except (RateLimitError, APIError) as e:
+        except (RateLimitError, APIError, GithubException) as e:
             if attempt == max_retries:
                 raise
-            logger.warning(
-                f"{func.__name__} failed (attempt {attempt}): {e}. retrying in {delay}s"
-            )
+            logger.warning(f"{func.__name__} failed (attempt {attempt}): {e}. retrying in {delay}s")
             time.sleep(delay)
             delay *= backoff
 
@@ -79,7 +72,7 @@ def expand_story(
     tone="neutral",
     detail_level="medium",
     prompt_template_path=None,
-    cache_file=None,
+    cache_file=None
 ):
     """
     Expand a single actor_line into a full user story (or return from cache).
@@ -174,77 +167,57 @@ def expand_stories_batch(
     model="gpt-4",
     tone="neutral",
     detail_level="medium",
-    prompt_template_path=None,
+    prompt_template_path=None
 ):
     """
-    Batch‐expand multiple actor_lines in one OpenAI call.
-    Returns a dict mapping each actor_line → full markdown body.
+    Batch-expand multiple actor_lines in one OpenAI call.
+    Returns a dict mapping each actor_line to its full markdown body.
     """
-    # 1) Early exit
     if not actor_lines:
         return {}
 
-    # 2) Build batch prompt
-    batch_text = "Generate complete user stories for:\n" + "\n".join(
-        f"- {a}" for a in actor_lines
-    )
+    batch_text = "Generate complete user stories for:\n" + "\n".join(f"- {a}" for a in actor_lines)
     user_content = batch_text
-
-    # 3) Optional Jinja2 header
     if prompt_template_path:
         try:
             from jinja2 import Template
-
             tpl = Template(open(prompt_template_path, encoding="utf-8").read())
             header = tpl.render(actor_line="", tone=tone, detail_level=detail_level)
             user_content = header + "\n\n" + batch_text
         except Exception as e:
             logger.warning(f"Batch template error ({e}); continuing without template")
 
-    # 4) Single API call with function-calling
     try:
         resp = _retry(
             openai.ChatCompletion.create,
             model=model,
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert product manager writing user stories.",
-                },
+                {"role": "system", "content": "You are an expert product manager writing user stories."},
                 {"role": "user", "content": user_content},
             ],
-            functions=[
-                {
-                    "name": "create_user_stories_batch",
-                    "description": "Generate structured user stories in batch",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "stories": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "actor_line": {"type": "string"},
-                                        "description": {"type": "string"},
-                                        "acceptance_criteria": {
-                                            "type": "array",
-                                            "items": {"type": "string"},
-                                        },
-                                    },
-                                    "required": [
-                                        "actor_line",
-                                        "description",
-                                        "acceptance_criteria",
-                                    ],
+            functions=[{
+                "name": "create_user_stories_batch",
+                "description": "Generate structured user stories in batch",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "stories": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "actor_line": {"type": "string"},
+                                    "description": {"type": "string"},
+                                    "acceptance_criteria": {"type": "array", "items": {"type": "string"}}
                                 },
+                                "required": ["actor_line", "description", "acceptance_criteria"]
                             }
-                        },
-                        "required": ["stories"],
+                        }
                     },
+                    "required": ["stories"]
                 }
-            ],
-            function_call="auto",
+            }],
+            function_call="auto"
         )
         msg = resp.choices[0].message
         if msg.get("function_call"):
@@ -260,7 +233,7 @@ def expand_stories_batch(
     except Exception as e:
         logger.warning(f"Batch expand failed ({e}); falling back to individual calls")
 
-    # 5) Plain-text batch split if no function_call but content present
+    # plain-text split if function-call not used
     try:
         text = msg.content or ""
         if text:
@@ -268,15 +241,15 @@ def expand_stories_batch(
             for idx, al in enumerate(actor_lines):
                 # Locate this actor_line in the raw text
                 pattern = re.escape(al)
-                matches = list(re.finditer(rf'^' + pattern + r'.*', text, re.MULTILINE))
+                matches = list(re.finditer(rf'^'+pattern+r'.*', text, re.MULTILINE))
                 if not matches:
                     continue
                 start = matches[0].start()
                 # Determine end: start of next actor_line or end of text
                 if idx + 1 < len(actor_lines):
                     next_pattern = re.escape(actor_lines[idx+1])
-                    next_match = re.search(rf'^' + next_pattern + r'.*', text[start:], re.MULTILINE)
-                    end = start + (next_match.start() if next_match else len(text))
+                    nm = re.search(rf'^'+next_pattern+r'.*', text[start:], re.MULTILINE)
+                    end = start + (nm.start() if nm else len(text))
                 else:
                     end = len(text)
                 out[al] = text[start:end].strip()
@@ -285,10 +258,7 @@ def expand_stories_batch(
     except Exception:
         logger.warning("Failed to split plain-text batch response; falling back to individual calls")
 
-
-    # 6) Fallback to single‐story expansion
-    from .core import expand_story  # avoid top-level circular import
-
+    # fallback to single-story expansion
     return {
         a: expand_story(
             a,
@@ -296,8 +266,7 @@ def expand_stories_batch(
             tone=tone,
             detail_level=detail_level,
             prompt_template_path=prompt_template_path,
-        )
-        for a in actor_lines
+        ) for a in actor_lines
     }
 
 
@@ -309,14 +278,14 @@ def create_milestone_and_issues(
     tone="neutral",
     detail_level="medium",
     prompt_template_path=None,
-    cache_file=None,
+    cache_file=None
 ):
     """
     Create a milestone and batch‐expand & create issues for new actor_lines.
     """
     epic = section["title"]
     try:
-        milestone = repo.create_milestone(title=epic)
+        milestone = _retry(repo.create_milestone, title=epic)
     except GithubException:
         milestone = next((m for m in repo.get_milestones() if m.title == epic), None)
         if not milestone:
@@ -333,7 +302,7 @@ def create_milestone_and_issues(
         model=model,
         tone=tone,
         detail_level=detail_level,
-        prompt_template_path=prompt_template_path,
+        prompt_template_path=prompt_template_path
     )
 
     # Create issues
@@ -341,7 +310,12 @@ def create_milestone_and_issues(
         body = bodies.get(al, f"{al}\n\n**Failed to expand story**")
         title = al if len(al) <= 50 else al[:47] + "..."
         try:
-            issue = repo.create_issue(title=title, body=body, milestone=milestone)
+            issue = _retry(
+                repo.create_issue,
+                title=title,
+                body=body,
+                milestone=milestone
+            )
             existing_actor_lines.add(al)
             logger.info(f"Created issue #{issue.number} for '{al}'")
         except GithubException as e:
