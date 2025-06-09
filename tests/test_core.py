@@ -90,3 +90,20 @@ def test_expand_story_fallback(monkeypatch):
     body = expand_story(actor, model="gpt-test")
     assert actor in body
     assert "Failed to expand story" in body
+
+
+def test_retry_non_retryable_error():
+    """ValueError should not be retried by _retry"""
+    from github_gpt_issues.core import _retry
+
+    calls = {"count": 0}
+
+    def bad():
+        calls["count"] += 1
+        raise ValueError("fatal error")
+
+    import pytest
+
+    with pytest.raises(ValueError):
+        _retry(bad)
+    assert calls["count"] == 1

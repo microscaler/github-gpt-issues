@@ -6,19 +6,29 @@ Core functionality for github-gpt-issues:
 - expand_stories_batch (batch)
 - create_milestone_and_issues
 """
+import functools
 import os
 import json
 import re
-import time
-import logging
 import openai
+import time
+import random
+import logging
+
 
 # Gracefully handle missing openai.error for tests
 # fmt: off
 try:
     from openai.error import RateLimitError, APIError
 except ImportError:
-    RateLimitError = APIError = Exception
+    # openai.error not available: define dummy exception classes so only these are retryable
+    class RateLimitError(Exception):
+        """Dummy RateLimitError for retry logic"""
+        pass
+
+    class APIError(Exception):
+        """Dummy APIError for retry logic"""
+        pass
 # fmt: on
 
 from github import GithubException
@@ -54,22 +64,39 @@ def parse_markdown(markdown_text):
     return sections
 
 
-def _retry(func, *args, max_retries=3, initial_delay=1, backoff=2, **kwargs):
-    """
-    Retry wrapper for API calls on RateLimitError, APIError, and GithubException.
-    """
+def _retry(
+    func,
+    *args,
+    max_retries=3,
+    initial_delay=1.0,
+    backoff_multiplier=2.0,
+    jitter=False,
+    **kwargs,
+):
     delay = initial_delay
-    for attempt in range(1, max_retries + 1):
+    retryable_exceptions = (RateLimitError, APIError, GithubException)
+    callable_func = (
+        func if not args and not kwargs else functools.partial(func, *args, **kwargs)
+    )
+
+    for attempt in range(max_retries + 1):
         try:
-            return func(*args, **kwargs)
-        except (RateLimitError, APIError, GithubException) as e:
+            return callable_func()
+        except retryable_exceptions as e:
             if attempt == max_retries:
+                logger.error(f"Retry failed after {max_retries} attempts: {e}")
                 raise
+            wait = delay * (1 + random.random()) if jitter else delay
             logger.warning(
-                f"{func.__name__} failed (attempt {attempt}): {e}. retrying in {delay}s"
+                f"{type(e).__name__} on attempt {attempt + 1}/{max_retries}: {e}. Retrying in {wait:.2f}s..."
             )
-            time.sleep(delay)
-            delay *= backoff
+            time.sleep(wait)
+            delay *= backoff_multiplier
+            continue
+        except Exception as e:
+            logger.error(f"Non-retryable exception: {e}")
+            raise
+    return None
 
 
 def expand_story(
@@ -80,20 +107,16 @@ def expand_story(
     prompt_template_path=None,
     cache_file=None,
 ):
-    """
-    Expand a single actor_line into a full user story (or return from cache).
-    """
-    # cache load
     cache = {}
     if cache_file and os.path.exists(cache_file):
         try:
             cache = json.loads(open(cache_file, "r", encoding="utf-8").read())
         except Exception as e:
             logger.warning(f"Could not load cache: {e}")
-        if actor_line in cache:
-            return cache[actor_line]
+        else:
+            if actor_line in cache:
+                return cache[actor_line]
 
-    # prepare prompt
     user_content = actor_line
     if prompt_template_path:
         try:
@@ -108,48 +131,48 @@ def expand_story(
         except Exception as e:
             logger.warning(f"Template error: {e}; using actor_line only")
 
-    # API call
     try:
         resp = _retry(
-            openai.ChatCompletion.create,
-            model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert product manager writing user stories.",
-                },
-                {"role": "user", "content": user_content},
-            ],
-            functions=[
-                {
-                    "name": "create_user_story",
-                    "description": "Generate structured user story",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "actor_line": {"type": "string"},
-                            "description": {"type": "string"},
-                            "acceptance_criteria": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                        },
-                        "required": [
-                            "actor_line",
-                            "description",
-                            "acceptance_criteria",
-                        ],
+            lambda: openai.ChatCompletion.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert product manager writing user stories.",
                     },
-                }
-            ],
-            function_call="auto",
+                    {"role": "user", "content": user_content},
+                ],
+                functions=[
+                    {
+                        "name": "create_user_story",
+                        "description": "Generate structured user story",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "actor_line": {"type": "string"},
+                                "description": {"type": "string"},
+                                "acceptance_criteria": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "required": [
+                                "actor_line",
+                                "description",
+                                "acceptance_criteria",
+                            ],
+                        },
+                    }
+                ],
+                function_call="auto",
+            )
         )
         msg = resp.choices[0].message
         if msg.get("function_call"):
             data = json.loads(msg.function_call.arguments)
             body = f"{data['actor_line']}\n\n{data['description']}\n\n**Acceptance Criteria:**\n"
-            for c in data["acceptance_criteria"]:
-                body += f"- {c}\n"
+            for crit in data["acceptance_criteria"]:
+                body += f"- {crit}\n"
         else:
             text = (msg.content or "").strip()
             body = text if text.startswith(actor_line) else f"{actor_line}\n\n{text}"
@@ -157,14 +180,12 @@ def expand_story(
         logger.error(f"expand_story API failed: {e}")
         body = f"{actor_line}\n\n**Failed to expand story**"
 
-    # save cache
     if cache_file:
         try:
             cache[actor_line] = body
             open(cache_file, "w", encoding="utf-8").write(json.dumps(cache, indent=2))
         except Exception as e:
             logger.warning(f"Could not write cache: {e}")
-
     return body
 
 
@@ -175,10 +196,6 @@ def expand_stories_batch(
     detail_level="medium",
     prompt_template_path=None,
 ):
-    """
-    Batch-expand multiple actor_lines in one OpenAI call.
-    Returns a dict mapping each actor_line to its full markdown body.
-    """
     if not actor_lines:
         return {}
 
@@ -198,47 +215,48 @@ def expand_stories_batch(
 
     try:
         resp = _retry(
-            openai.ChatCompletion.create,
-            model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert product manager writing user stories.",
-                },
-                {"role": "user", "content": user_content},
-            ],
-            functions=[
-                {
-                    "name": "create_user_stories_batch",
-                    "description": "Generate structured user stories in batch",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "stories": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "actor_line": {"type": "string"},
-                                        "description": {"type": "string"},
-                                        "acceptance_criteria": {
-                                            "type": "array",
-                                            "items": {"type": "string"},
-                                        },
-                                    },
-                                    "required": [
-                                        "actor_line",
-                                        "description",
-                                        "acceptance_criteria",
-                                    ],
-                                },
-                            }
-                        },
-                        "required": ["stories"],
+            lambda: openai.ChatCompletion.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert product manager writing user stories.",
                     },
-                }
-            ],
-            function_call="auto",
+                    {"role": "user", "content": user_content},
+                ],
+                functions=[
+                    {
+                        "name": "create_user_stories_batch",
+                        "description": "Generate structured user stories in batch",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "stories": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "actor_line": {"type": "string"},
+                                            "description": {"type": "string"},
+                                            "acceptance_criteria": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                            },
+                                        },
+                                        "required": [
+                                            "actor_line",
+                                            "description",
+                                            "acceptance_criteria",
+                                        ],
+                                    },
+                                }
+                            },
+                            "required": ["stories"],
+                        },
+                    }
+                ],
+                function_call="auto",
+            )
         )
         msg = resp.choices[0].message
         if msg.get("function_call"):
@@ -264,32 +282,7 @@ def expand_stories_batch(
     except Exception as e:
         logger.warning(f"Batch expand failed ({e}); falling back to individual calls")
 
-    # plain-text split fallback
-    try:
-        text = msg.content or ""
-        out = {}
-        for idx, al in enumerate(actor_lines):
-            # Locate this actor_line in the raw text
-            pattern = re.escape(al)
-            matches = list(re.finditer(rf"^{pattern}.*", text, re.MULTILINE))
-            if not matches:
-                continue
-            start = matches[0].start()
-            # Determine end: start of next actor_line or end of text
-            end = len(text)
-            if idx + 1 < len(actor_lines):
-                next_pattern = re.escape(actor_lines[idx + 1])
-                nm = re.search(rf"^{next_pattern}.*", text[start:], re.MULTILINE)
-                end = start + (nm.start() if nm else len(text))
-            out[al] = text[start:end].strip()
-        if out:
-            return out
-    except Exception:
-        logger.warning(
-            "Failed to split plain-text batch response; falling back to individual calls"
-        )
-
-    # fallback to single-story expansion
+    # fallback to individual expansion
     return {
         a: expand_story(
             a,
@@ -314,11 +307,10 @@ def create_milestone_and_issues(
 ):
     epic = section["title"]
     try:
-        milestone = _retry(repo.create_milestone, title=epic)
+        milestone = _retry(lambda: repo.create_milestone(title=epic))
     except GithubException:
-        # retry fetching existing milestones if creation failed
         try:
-            all_ms = _retry(repo.get_milestones)
+            all_ms = _retry(lambda: repo.get_milestones())
         except Exception as ge:
             logger.error(f"Failed to fetch milestones: {ge}")
             return
@@ -344,7 +336,7 @@ def create_milestone_and_issues(
         title = al if len(al) <= 50 else al[:47] + "..."
         try:
             issue = _retry(
-                repo.create_issue, title=title, body=body, milestone=milestone
+                lambda: repo.create_issue(title=title, body=body, milestone=milestone)
             )
             existing_actor_lines.add(al)
             logger.info(f"Created issue #{issue.number} for '{al}'")

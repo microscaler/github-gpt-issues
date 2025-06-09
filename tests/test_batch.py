@@ -1,14 +1,19 @@
 import pytest
 import json
 import openai
-from github_gpt_issues.core import expand_stories_batch, _retry
+from github_gpt_issues.core import (
+    _retry,
+    RateLimitError,
+    APIError,
+    expand_stories_batch,
+)
 
 
 # Dummy function to simulate API errors and successes
 def flaky_func_factory(failures, exception_type):
     state = {"calls": 0}
 
-    def func(*args, **kwargs):
+    def func():  # <- fix: remove *args
         state["calls"] += 1
         if state["calls"] <= failures:
             raise exception_type("Rate limit hit")
@@ -112,7 +117,6 @@ def test_expand_stories_batch_fallback(monkeypatch):
     monkeypatch.setattr(
         core_module, "expand_story", lambda *args, **kwargs: f"story_{args[0]}"
     )
-
     # Single-item fallback
     single = expand_stories_batch(["X1"], model="gpt-test")
     assert single == {"X1": "story_X1"}
@@ -123,22 +127,26 @@ def test_expand_stories_batch_fallback(monkeypatch):
 
 def test_retry_succeeds_after_retries(monkeypatch):
     """_retry should retry on RateLimitError with no delay"""
-    func = flaky_func_factory(failures=2, exception_type=openai.error.RateLimitError)
-    # Speed up sleep
+
+    func = flaky_func_factory(failures=2, exception_type=RateLimitError)
     monkeypatch.setattr("time.sleep", lambda s: None)
-    res = _retry(func, max_retries=3, initial_delay=0, backoff=1)
+
+    # ✅ Just pass the callable, don't pre-invoke it
+    res = _retry(func, max_retries=3, initial_delay=2, backoff_multiplier=3)
+
     assert res == "success"
-    # Ensure retries occurred
     assert func.state["calls"] == 3
 
 
 def test_retry_raises_after_max(monkeypatch):
-    """_retry should raise after exceeding max_retries"""
-    func = flaky_func_factory(failures=5, exception_type=openai.error.APIError)
+
+    func = flaky_func_factory(failures=5, exception_type=APIError)
     monkeypatch.setattr("time.sleep", lambda s: None)
-    with pytest.raises(openai.error.APIError):
-        _retry(func, max_retries=3, initial_delay=0, backoff=1)
-    assert func.state["calls"] == 3
+
+    with pytest.raises(APIError):
+        _retry(lambda: func(), max_retries=3, initial_delay=1, backoff_multiplier=2)
+
+    assert func.state["calls"] == 4  # 1 initial + 3 retries
 
 
 def test_expand_stories_batch_malformed_json(monkeypatch, caplog):
